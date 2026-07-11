@@ -4,7 +4,9 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -20,6 +22,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.wear.compose.material3.Button
@@ -27,14 +30,11 @@ import androidx.wear.compose.material3.ButtonDefaults
 import androidx.wear.compose.material3.MaterialTheme
 import androidx.wear.compose.material3.Text
 import com.example.mdi2_112_stepcounter.presentation.theme.MDI2112StepCounterTheme
-//import androidx.navigation.NavHostController
-//import androidx.navigation.compose.NavHost
-//import androidx.navigation.compose.composable
-//import androidx.navigation.compose.currentBackStackEntryAsState
-//import androidx.navigation.compose.rememberNavController
-//import androidx.compose.foundation.gestures.detectHorizontalDragGestures
-//import androidx.compose.foundation.layout.Box
-//import androidx.compose.ui.input.pointer.pointerInput
+import androidx.navigation.NavHostController
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
+import androidx.navigation.compose.rememberNavController
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -49,30 +49,107 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun WearFitnessApp() {
+
+    val navController = rememberNavController()
+
     var steps by remember { mutableIntStateOf(30) }
     var calories by remember { mutableIntStateOf(25) }
     var stepsGoal by remember { mutableIntStateOf(10000) }
     var caloriesGoal by remember { mutableIntStateOf(800) }
 
-    DailyProgressScreen(
-        steps = steps,
-        calories = calories,
-        stepsGoal = stepsGoal,
-        caloriesGoal = caloriesGoal,
-        onAddStep = {
-            steps++
-            calories++
+    SwipeNavigationContainer(
+        navController = navController
+    ) {
+        NavHost(
+            navController = navController,
+            startDestination = "progress"
+        ) {
+
+            composable("progress") {
+                DailyProgressScreen(
+                    steps = steps,
+                    calories = calories,
+                    stepsGoal = stepsGoal,
+                    caloriesGoal = caloriesGoal,
+                    onAddStep = {
+                        steps++
+                        calories++
+                    }
+                )
+            }
+
+            composable("heart") {
+                HeartRateScreen()
+            }
+
+            composable("goals") {
+                ModifyGoalScreen(
+                    stepsGoal = stepsGoal,
+                    caloriesGoal = caloriesGoal,
+                    onAddStep = { stepsGoal += 100 },
+                    onRemoveStep = { stepsGoal -= 100 },
+                    onAddCalories = { caloriesGoal += 50 },
+                    onRemoveCalories = { caloriesGoal -= 50 }
+                )
+            }
         }
-    )
-    HeartRateScreen()
-    ModifyGoalScreen(
-        stepsGoal = stepsGoal,
-        caloriesGoal = caloriesGoal,
-        onAddStep = { stepsGoal += 100 },
-        onRemoveStep = { stepsGoal -= 100 },
-        onAddCalories = { caloriesGoal += 50 },
-        onRemoveCalories = { caloriesGoal -= 50 }
-    )
+    }
+}
+
+@Composable
+fun SwipeNavigationContainer(
+    navController: NavHostController,
+     content: @Composable () -> Unit
+) {
+    val routes = listOf("progress", "heart", "goals")
+    val backStackEntry by navController.currentBackStackEntryAsState()
+    val currentRoute = backStackEntry?.destination?.route ?: "progress"
+    val currentIndex = routes.indexOf(currentRoute)
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black)
+            .pointerInput(currentRoute) {
+                var totalDrag = 0f
+                detectHorizontalDragGestures(
+                    onDragStart = {
+                        totalDrag = 0f
+                    },
+                    onHorizontalDrag = { change, dragAmount ->
+                        change.consume()
+                        totalDrag += dragAmount
+                    },
+                    onDragEnd = {
+                        // Move Forward
+                        if (
+                            totalDrag < -60 &&
+                            currentIndex < routes.lastIndex
+                        ) {
+                            navController.navigate(
+                                routes[currentIndex + 1]
+                            ) {
+                                launchSingleTop = true
+                            }
+                        }
+                        // Move Backward
+                        if (
+                            totalDrag > 60 &&
+                            currentIndex > 0
+                        ) {
+                            navController.navigate(
+                                routes[currentIndex - 1]
+                            ) {
+                                launchSingleTop = true
+                            }
+                        }
+                    }
+                )
+            },
+        contentAlignment = Alignment.Center
+    ) {
+        content()
+    }
 }
 
 @Composable
