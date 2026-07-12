@@ -1,5 +1,8 @@
 package com.example.mdi2_112_stepcounter.presentation
 
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -23,6 +26,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.wear.compose.material3.Button
@@ -35,10 +39,26 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import android.Manifest
+import android.content.Context
+import android.content.pm.PackageManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.platform.LocalContext
+import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
+import androidx.core.content.ContextCompat.getSystemService
+
+const val CHANNEL_ID = "fitness_alerts"
+const val HEART_RATE_NOTIFICATION_ID = 1
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        createNotificationChannel(this)
         setContent {
             MDI2112StepCounterTheme {
                 WearFitnessApp()
@@ -47,15 +67,81 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+private fun createNotificationChannel(context: Context) {
+    val channel = NotificationChannel(
+        CHANNEL_ID,
+        "Fitness Alerts",
+        NotificationManager.IMPORTANCE_DEFAULT
+    ).apply {
+        description = "Heart-rate and activity reminders"
+    }
+
+    val notificationManager = getSystemService(context, NotificationManager::class.java)
+    notificationManager?.createNotificationChannel(channel)
+}
+
 @Composable
 fun WearFitnessApp() {
-
     val navController = rememberNavController()
+    val context = LocalContext.current
 
     var steps by remember { mutableIntStateOf(30) }
+    var heartRate by remember { mutableIntStateOf(78) }
     var calories by remember { mutableIntStateOf(25) }
     var stepsGoal by remember { mutableIntStateOf(10000) }
     var caloriesGoal by remember { mutableIntStateOf(800) }
+
+    var heartRateNotificationSent by remember {
+        mutableStateOf(false)
+    }
+    var notificationPermissionGranted by remember {
+        mutableStateOf(
+            Build.VERSION.SDK_INT <
+                    Build.VERSION_CODES.TIRAMISU ||
+                    ContextCompat.checkSelfPermission(
+                        context,
+                        Manifest.permission.POST_NOTIFICATIONS
+                    ) == PackageManager.PERMISSION_GRANTED
+        )
+    }
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        notificationPermissionGranted = isGranted
+    }
+
+    LaunchedEffect(Unit) {
+        if (
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !notificationPermissionGranted
+        ) {
+            notificationPermissionLauncher.launch(
+                Manifest.permission.POST_NOTIFICATIONS
+            )
+        }
+    }
+
+    LaunchedEffect(
+        heartRate,
+        notificationPermissionGranted
+    ) {
+        if (
+            heartRate >= 100 &&
+            !heartRateNotificationSent &&
+            notificationPermissionGranted
+        ) {
+            showNotification(
+                context = context,
+                notificationId = HEART_RATE_NOTIFICATION_ID,
+                title = "Heart Rate Alert",
+                message ="Your heart rate is $heartRate BPM or higher!"
+            )
+            heartRateNotificationSent = true
+        }
+
+        if (heartRate < 100) {
+            heartRateNotificationSent = false
+        }
+    }
 
     SwipeNavigationContainer(
         navController = navController
@@ -79,7 +165,11 @@ fun WearFitnessApp() {
             }
 
             composable("heart") {
-                HeartRateScreen()
+                HeartRateScreen(
+                    heartRate = heartRate,
+                    onAddToHeartRate = { heartRate++ },
+                    onRemoveFromHeartRate = { heartRate-- }
+                )
             }
 
             composable("goals") {
@@ -216,7 +306,11 @@ fun DailyProgressScreen(
 }
 
 @Composable
-fun HeartRateScreen() {
+fun HeartRateScreen(
+    heartRate: Int,
+    onAddToHeartRate: () -> Unit,
+    onRemoveFromHeartRate: () -> Unit
+) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -227,17 +321,52 @@ fun HeartRateScreen() {
     ) {
         Text(
             text = "Heart Rate",
-            color = Color.Red,
+            color = Color.Yellow,
             style = MaterialTheme.typography.titleMedium
         )
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        Text(
-            text = "78 BPM ❤️",
-            color = Color.White,
-            style = MaterialTheme.typography.bodyMedium
-        )
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center
+        ) {
+            Button(
+                onClick = { onRemoveFromHeartRate() },
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color.Red,
+                    contentColor = Color.White
+                )
+            ) {
+                Text(
+                    text = "-",
+                    style = MaterialTheme.typography.titleLarge
+                )
+            }
+
+            Spacer(modifier = Modifier.width(16.dp))
+
+            Text(
+                text = "$heartRate BPM ❤️",
+                color = Color.White,
+                style = MaterialTheme.typography.bodyMedium
+            )
+
+            Spacer(modifier = Modifier.width(16.dp))
+
+            Button(
+                onClick = { onAddToHeartRate() },
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color.Green,
+                    contentColor = Color.Black
+                )
+            ) {
+                Text(
+                    text = "+",
+                    style = MaterialTheme.typography.titleLarge
+                )
+            }
+        }
     }
 }
 
@@ -364,6 +493,40 @@ fun ModifyGoalScreen(
     }
 }
 
+fun showNotification(
+    context: Context,
+    notificationId: Int,
+    title: String,
+    message: String
+) {
+    if (
+        Build.VERSION.SDK_INT >=
+        Build.VERSION_CODES.TIRAMISU &&
+        ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.POST_NOTIFICATIONS
+        ) != PackageManager.PERMISSION_GRANTED
+    ) {
+        return
+    }
+    val notification =
+        NotificationCompat.Builder(
+            context,
+            CHANNEL_ID
+        ).setSmallIcon(
+            android.R.drawable.ic_dialog_info
+        )
+            .setContentTitle(title)
+            .setContentText(message)
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setAutoCancel(true)
+            .build()
+
+    NotificationManagerCompat
+        .from(context)
+        .notify(notificationId, notification)
+}
+
 @Preview(showBackground = true)
 @Composable
 fun StepCounterScreenPreview() {
@@ -376,7 +539,11 @@ fun StepCounterScreenPreview() {
 @Composable
 fun HeartRateScreenPreview() {
     MDI2112StepCounterTheme {
-        HeartRateScreen()
+        HeartRateScreen(
+            heartRate = 78,
+            onAddToHeartRate = {},
+            onRemoveFromHeartRate = {}
+        )
     }
 }
 
