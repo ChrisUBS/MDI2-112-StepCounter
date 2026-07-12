@@ -54,6 +54,7 @@ import androidx.core.content.ContextCompat.getSystemService
 
 const val CHANNEL_ID = "fitness_alerts"
 const val HEART_RATE_NOTIFICATION_ID = 1
+const val STEPS_NOTIFICATION_ID = 2
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -94,6 +95,9 @@ fun WearFitnessApp() {
     var heartRateNotificationSent by remember {
         mutableStateOf(false)
     }
+    var stepsNotificationSent by remember {
+        mutableStateOf(false)
+    }
     var notificationPermissionGranted by remember {
         mutableStateOf(
             Build.VERSION.SDK_INT <
@@ -122,6 +126,7 @@ fun WearFitnessApp() {
 
     LaunchedEffect(
         heartRate,
+        steps,
         notificationPermissionGranted
     ) {
         if (
@@ -140,6 +145,24 @@ fun WearFitnessApp() {
 
         if (heartRate < 100) {
             heartRateNotificationSent = false
+        }
+
+        if (
+            steps >= 1000 &&
+            !stepsNotificationSent &&
+            notificationPermissionGranted
+        ) {
+            showNotification(
+                context = context,
+                notificationId = STEPS_NOTIFICATION_ID,
+                title = "Step Count Achieved!",
+                message = "Congratulations! You've reached $steps steps."
+            )
+            stepsNotificationSent = true
+        }
+
+        if (steps < 1000) {
+            stepsNotificationSent = false
         }
     }
 
