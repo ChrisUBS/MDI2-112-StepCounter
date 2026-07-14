@@ -42,11 +42,14 @@ import androidx.navigation.compose.rememberNavController
 import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.ui.platform.LocalContext
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
@@ -56,14 +59,72 @@ const val CHANNEL_ID = "fitness_alerts"
 const val HEART_RATE_NOTIFICATION_ID = 1
 const val STEPS_NOTIFICATION_ID = 2
 
-class MainActivity : ComponentActivity() {
+class MainActivity : ComponentActivity(), SensorEventListener {
+    private lateinit var sensorManager: SensorManager
+    private var heartRateSensor: Sensor? = null
+    private var heartRate by mutableIntStateOf(72)
+
+    private val heartRatePermissionLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { isGranted ->
+        if(isGranted) {
+            registerHeartRateSensor()
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         createNotificationChannel(this)
+        sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
+        heartRateSensor = sensorManager.getDefaultSensor(Sensor.TYPE_HEART_RATE)
+        val heartRatePermission = getHeartRatePermission()
+        if (ContextCompat.checkSelfPermission(this, heartRatePermission) != PackageManager.PERMISSION_GRANTED) {
+            heartRatePermissionLauncher.launch(
+                heartRatePermission
+            )
+        }
+
         setContent {
             MDI2112StepCounterTheme {
-                WearFitnessApp()
+                WearFitnessApp(
+                    heartRateSensorValue = heartRate,
+                    hasHeartRateSensor = heartRateSensor != null
+                )
             }
+        }
+    }
+
+    private fun getHeartRatePermission() : String {
+        return if (Build.VERSION.SDK_INT >= 36) {
+            "android.permission.health.READ_HEART_RATE"
+        } else {
+            Manifest.permission.BODY_SENSORS
+        }
+    }
+
+    private fun registerHeartRateSensor() {
+        val permission = getHeartRatePermission()
+        if (ContextCompat.checkSelfPermission(this, permission) != PackageManager.PERMISSION_GRANTED) {
+            return
+        }
+        heartRateSensor?.let {sensor -> sensorManager.registerListener(this, sensor, SensorManager.SENSOR_DELAY_NORMAL)}
+    }
+
+    override fun onResume() {
+        super.onResume()
+        registerHeartRateSensor()
+    }
+
+    override fun onPause() {
+        super.onPause()
+        sensorManager.unregisterListener(this)
+    }
+
+    override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {
+
+    }
+
+    override fun onSensorChanged(event: SensorEvent?) {
+        if (event?.sensor?.type == Sensor.TYPE_HEART_RATE) {
+            heartRate = event.values[0].toInt()
         }
     }
 }
@@ -82,12 +143,11 @@ private fun createNotificationChannel(context: Context) {
 }
 
 @Composable
-fun WearFitnessApp() {
+fun WearFitnessApp(heartRateSensorValue: Int, hasHeartRateSensor: Boolean) {
     val navController = rememberNavController()
     val context = LocalContext.current
 
     var steps by remember { mutableIntStateOf(30) }
-    var heartRate by remember { mutableIntStateOf(78) }
     var calories by remember { mutableIntStateOf(25) }
     var stepsGoal by remember { mutableIntStateOf(10000) }
     var caloriesGoal by remember { mutableIntStateOf(800) }
@@ -125,12 +185,12 @@ fun WearFitnessApp() {
     }
 
     LaunchedEffect(
-        heartRate,
+        heartRateSensorValue,
         steps,
         notificationPermissionGranted
     ) {
         if (
-            heartRate >= 100 &&
+            heartRateSensorValue >= 100 &&
             !heartRateNotificationSent &&
             notificationPermissionGranted
         ) {
@@ -138,12 +198,12 @@ fun WearFitnessApp() {
                 context = context,
                 notificationId = HEART_RATE_NOTIFICATION_ID,
                 title = "Heart Rate Alert",
-                message ="Your heart rate is $heartRate BPM or higher!"
+                message ="Your heart rate is $heartRateSensorValue BPM or higher!"
             )
             heartRateNotificationSent = true
         }
 
-        if (heartRate < 100) {
+        if (heartRateSensorValue < 100) {
             heartRateNotificationSent = false
         }
 
@@ -189,9 +249,8 @@ fun WearFitnessApp() {
 
             composable("heart") {
                 HeartRateScreen(
-                    heartRate = heartRate,
-                    onAddToHeartRate = { heartRate++ },
-                    onRemoveFromHeartRate = { heartRate-- }
+                    heartRate = heartRateSensorValue,
+                    hasHeartRateSensor = hasHeartRateSensor
                 )
             }
 
@@ -329,11 +388,7 @@ fun DailyProgressScreen(
 }
 
 @Composable
-fun HeartRateScreen(
-    heartRate: Int,
-    onAddToHeartRate: () -> Unit,
-    onRemoveFromHeartRate: () -> Unit
-) {
+fun HeartRateScreen(heartRate: Int, hasHeartRateSensor: Boolean) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -354,39 +409,17 @@ fun HeartRateScreen(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.Center
         ) {
-            Button(
-                onClick = { onRemoveFromHeartRate() },
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = Color.Red,
-                    contentColor = Color.White
-                )
-            ) {
+            if (hasHeartRateSensor) {
                 Text(
-                    text = "-",
-                    style = MaterialTheme.typography.titleLarge
+                    text = "$heartRate BPM ❤️",
+                    color = Color.White,
+                    style = MaterialTheme.typography.bodyMedium
                 )
-            }
-
-            Spacer(modifier = Modifier.width(16.dp))
-
-            Text(
-                text = "$heartRate BPM ❤️",
-                color = Color.White,
-                style = MaterialTheme.typography.bodyMedium
-            )
-
-            Spacer(modifier = Modifier.width(16.dp))
-
-            Button(
-                onClick = { onAddToHeartRate() },
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = Color.Green,
-                    contentColor = Color.Black
-                )
-            ) {
+            } else {
                 Text(
-                    text = "+",
-                    style = MaterialTheme.typography.titleLarge
+                    text = "No Heart Rate Sensor",
+                    color = Color.Red,
+                    style = MaterialTheme.typography.bodyMedium
                 )
             }
         }
@@ -554,7 +587,10 @@ fun showNotification(
 @Composable
 fun StepCounterScreenPreview() {
     MDI2112StepCounterTheme {
-        WearFitnessApp()
+        WearFitnessApp(
+            heartRateSensorValue = 78,
+            hasHeartRateSensor = false
+        )
     }
 }
 
@@ -564,8 +600,7 @@ fun HeartRateScreenPreview() {
     MDI2112StepCounterTheme {
         HeartRateScreen(
             heartRate = 78,
-            onAddToHeartRate = {},
-            onRemoveFromHeartRate = {}
+            hasHeartRateSensor = false
         )
     }
 }
